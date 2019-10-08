@@ -243,6 +243,7 @@ class ClassCompound (CompoundBase):
 
         self.struct = (self.compound.attrib['kind'] == "struct")
         self.public = (self.definition.attrib['prot'] == "public")
+        self.template_specialization = (self.name.find('<') > 0)
 
         # Handle templates
         self._templateParams (self.definition.find('templateparamlist'))
@@ -296,6 +297,9 @@ class ClassCompound (CompoundBase):
 
     def write (self, output):
         if not self.public: return
+        if self.template_specialization:
+            output.err ("Disable class {} because template argument are not resolved for templated class specialization.".format(self.name))
+            return
         # Group member function by prototype
         member_funcs = dict()
         for m in self.member_funcs:
