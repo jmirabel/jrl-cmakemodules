@@ -10,6 +10,21 @@
 
 namespace doxygen
 {
+template <typename _class>
+struct class_doc_impl
+{
+static inline const char* run ()
+{
+  return "";
+}
+};
+
+template <typename _class>
+inline const char* class_doc ()
+{
+  return class_doc_impl<_class>::run();
+}
+
 template <typename FuncPtr>
 inline const char* member_func_doc (FuncPtr)
 {
@@ -27,11 +42,11 @@ static inline const char* run ()                                               \
   return "";                                                                   \
 }                                                                              \
 };                                                                             \
+                                                                               \
 template <                                                                     \
   typename Class                                                               \
   BOOST_PP_COMMA_IF(nargs)                                                     \
   BOOST_PP_ENUM_PARAMS(nargs, class Arg)>                                      \
-                                                                               \
 inline const char* constructor_doc ()                                          \
 {                                                                              \
   return constructor_doc_##nargs##_impl<                                       \

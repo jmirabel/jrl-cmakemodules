@@ -20,6 +20,16 @@ template_file_footer = \
 #endif // DOXYGEN_AUTODOC_HH
 """
 
+template_class_doc = \
+"""
+template <{tplargs}>
+struct class_doc_impl< {classname} >
+{{
+static inline const char* run ()
+{{
+  return "{docstring}";
+}}
+}};"""
 template_constructor_doc = \
 """
 template <{tplargs}>
@@ -295,11 +305,26 @@ class ClassCompound (CompoundBase):
         else:
             self.member_funcs.append (m)
 
+    def _writeClassDoc (self, output):
+        docstring = self.index.xml_docstring.getDocString (
+                self.definition.find('briefdescription'),
+                self.definition.find('detaileddescription'),
+                self.index.output)
+        if len(docstring) == 0: return
+        output.out (template_class_doc.format (
+            tplargs = self._templateDecl(),
+            classname = self._className(),
+            docstring = docstring,
+            ))
+
     def write (self, output):
         if not self.public: return
         if self.template_specialization:
             output.err ("Disable class {} because template argument are not resolved for templated class specialization.".format(self.name))
             return
+        # Write class doc
+        self._writeClassDoc(output)
+
         # Group member function by prototype
         member_funcs = dict()
         for m in self.member_funcs:
