@@ -7,17 +7,14 @@ from xml_docstring import XmlDocString
 import sys
 
 template_file_header = \
-"""#ifndef DOXYGEN_AUTODOC_HH
-#define DOXYGEN_AUTODOC_HH
+"""#ifndef DOXYGEN_AUTODOC_{header_guard}
+#define DOXYGEN_AUTODOC_{header_guard}
 
 #include "{path}/doxygen.hh"
-
-namespace doxygen {{
 """
 template_file_footer = \
 """
-} // namespace doxygen
-#endif // DOXYGEN_AUTODOC_HH
+#endif // DOXYGEN_AUTODOC_{header_guard}
 """
 
 template_class_doc = \
@@ -60,10 +57,26 @@ template_member_func_doc_body = \
 """
   if (function_ptr == static_cast<{rettype} ({classname_prefix}*) {argsstring}>(&{classname_prefix}{membername}))
     return "{docstring}";"""
+template_static_func_doc = \
+"""
+{template}inline const char* member_func_doc ({rettype} (*function_ptr) {argsstring})
+{{{body}
+  return "";
+}}"""
+template_static_func_doc_body = \
+"""
+  if (function_ptr == static_cast<{rettype} (*) {argsstring}>(&{namespace}::{membername}))
+    return "{docstring}";"""
 template_open_namespace = \
 """namespace {namespace} {{"""
 template_close_namespace = \
 """}} // namespace {namespace}"""
+template_include_intern = \
+"""#include "{filename}"
+"""
+template_include_extern = \
+"""#include <{filename}>
+"""
 
 def _templateParamToDict (param):
     type = param.find('type')
@@ -88,6 +101,10 @@ def _templateParamToDict (param):
         assert defname.text == declname.text
         return { "type": type.text, "name": defname.text }
 
+def makeHeaderGuard (filename):
+    import os
+    return filename.upper().replace('.', '_').replace(os.path.sep, '_')
+
 def format_description (brief, detailed):
     b = [ el.text.strip() for el in brief   .iter() if el.text ] if brief    is not None else []
     d = [ el.text.strip() for el in detailed.iter() if el.text ] if detailed is not None else []
@@ -102,12 +119,13 @@ class Reference(object):
         self.name = name
         self.index = index
 
-    def xmlToType (self, node, parentClass=None, tplargs=None):
+    def xmlToType (self, node, array=None, parentClass=None, tplargs=None):
         """
         - node:
         - parentClass: a class
         - tplargs: if one of the args is parentClass and no template arguments are provided,
                    set the template arguments to this value
+        - array: content of the sibling tag 'array'
         """
         if node.text is not None:
             t = node.text.strip()
@@ -130,6 +148,8 @@ class Reference(object):
                     t += " " + c.text.strip()
             if c.tail is not None:
                 t += " " + c.tail.strip()
+        if array is not None:
+            t += array.text
         return t
 
 # Only for function as of now.
@@ -144,7 +164,7 @@ class MemberDef(Reference):
         self.const = (memberdefxml.attrib['const']=="yes")
         self.static = (memberdefxml.attrib['static']=="yes")
         self.rettype = memberdefxml.find('type')
-        self.params = tuple( [ param.find('type') for param in self.xml.findall("param") ] )
+        self.params = tuple( [ (param.find('type'), param.find('array')) for param in self.xml.findall("param") ] )
         self.special = self.rettype.text is None and len(self.rettype.getchildren())==0
         #assert self.special or len(self.rettype.text) > 0
 
@@ -175,9 +195,9 @@ class MemberDef(Reference):
         if len(self.parent.template_params) > 0:
             tplargs = " <" + ", ".join([ d['name'] for d in self.parent.template_params ]) + " > "
             args = ", ".join(
-                    [ self.xmlToType(t, parentClass=self.parent, tplargs=tplargs) for t in self.params])
+                    [ self.xmlToType(type, array, parentClass=self.parent, tplargs=tplargs) for type,array in self.params])
         else:
-            args = ", ".join([ self.xmlToType(t) for t in self.params])
+            args = ", ".join([ self.xmlToType(type, array) for type, array in self.params])
         return args
 
     def s_tpldecl (self):
@@ -197,6 +217,12 @@ class MemberDef(Reference):
                 self.xml.find('detaileddescription'),
                 self.index.output)
 
+    def include (self):
+        import os.path
+        loc = self.xml.find('location')
+        # The location is based on $CMAKE_SOURCE_DIR. Remove first directory.
+        return loc.attrib['file'].split(os.path.sep,1)[1]
+
 class CompoundBase(Reference):
     def __init__ (self, compound, index):
         self.compound = compound
@@ -212,14 +238,19 @@ class NamespaceCompound (CompoundBase):
         super().__init__ (*args)
         self.typedefs = []
         self.enums = []
+        self.static_funcs = []
+        self.template_params = tuple()
 
         # Add references
         for section in self.definition.iterchildren("sectiondef"):
             assert "kind" in section.attrib
-            if section.attrib["kind"] == "enum":
+            kind = section.attrib["kind"]
+            if kind == "enum":
                 self.parseEnumSection (section)
-            elif section.attrib["kind"] == "typedef":
+            elif kind == "typedef":
                 self.parseTypedefSection (section)
+            elif kind == "func":
+                self.parseFuncSection (section)
 
     def parseEnumSection (self, section):
         for member in section.iterchildren("memberdef"):
@@ -240,6 +271,13 @@ class NamespaceCompound (CompoundBase):
                     name= self.name + "::" + member.find("name").text)
             self.index.registerReference (ref)
             self.typedefs.append(member)
+
+    def parseFuncSection (self, section):
+        for member in section.iterchildren("memberdef"):
+            self.static_funcs.append (MemberDef (self.index, member, self))
+
+    def innerNamespace (self):
+        return self.name
 
     def write (self, output):
         pass
@@ -296,6 +334,9 @@ class ClassCompound (CompoundBase):
             return self.name
         return self.name + " <" + ", ".join([ d['name'] for d in self.template_params ]) + " >"
 
+    def innerNamespace (self):
+        return self._className()
+
     def _memberfunc (self, member):
         m = MemberDef (self.index, member, self)
         if m.special:
@@ -322,6 +363,12 @@ class ClassCompound (CompoundBase):
         if self.template_specialization:
             output.err ("Disable class {} because template argument are not resolved for templated class specialization.".format(self.name))
             return
+
+        include = self.definition.find('includes')
+        output.open (include.text)
+        output.out (template_include_extern.format (filename=include.text))
+        output.out (template_open_namespace.format (namespace="doxygen"))
+
         # Write class doc
         self._writeClassDoc(output)
 
@@ -386,6 +433,9 @@ class ClassCompound (CompoundBase):
                 body = body
                 ))
 
+        output.out (template_close_namespace.format (namespace="doxygen"))
+        output.close()
+
     def _attribute (self, member):
         # TODO
         pass
@@ -406,21 +456,66 @@ class Index:
         for compound in self.tree.getroot().iterchildren ("compound"):
             if compound.attrib['kind'] in ["class", "struct"]:
                 obj = ClassCompound (compound, self)
-                self.compounds.add (obj.id)
             elif compound.attrib['kind'] == "namespace":
                 obj = NamespaceCompound (compound, self)
+            self.compounds.add (obj.id)
             self.registerReference (obj)
 
     def write (self):
         # Header
         from os.path import abspath, dirname
-        self.output.out(template_file_header.format (path = dirname(abspath(__file__))))
-        # Implement template specialization
+
+        # Implement template specialization for classes and member functions
         for id in self.compounds:
             compound = self.references[id]
             compound.write(self.output)
-        # Footer
-        self.output.out(template_file_footer)
+
+        self.output.open ("functions.h")
+
+        # Implement template specialization for static functions
+        static_funcs = dict()
+        includes = set()
+        for id in self.compounds:
+            compound = self.references[id]
+            for m in compound.static_funcs:
+                includes.add (m.include())
+                docstring = m.s_docstring()
+                if len(docstring) == 0: continue
+                prototype = m.prototypekey()
+                if prototype in static_funcs:
+                    static_funcs[prototype].append ( (m, docstring) )
+                else:
+                    static_funcs[prototype] = [ (m, docstring) , ]
+
+        self.output.out (
+                "".join([ template_include_intern.format (filename=filename)
+                    for filename in includes]))
+
+        self.output.out (template_open_namespace.format (namespace="doxygen"))
+
+        for prototype, member_and_docstring_s in static_funcs.items():
+            body = "".join([
+                template_static_func_doc_body.format (
+                    namespace = member.parent.innerNamespace(),
+                    membername = member.s_name(),
+                    docstring = docstring,
+                    rettype = member.s_rettype(),
+                    argsstring = member.s_prototypeArgs(),
+                    )
+                for member, docstring in member_and_docstring_s ])
+
+            member = member_and_docstring_s[0][0]
+            # TODO fix case of static method in templated class.
+            tplargs = ", ".join([ d['type'] + " " + d['name'] for d in member.parent.template_params + member.template_params ])
+            self.output.out (template_static_func_doc.format (
+                template = "template <{}>\n".format (tplargs) if len(tplargs) > 0 else "",
+                rettype = member.s_rettype(),
+                argsstring = member.s_prototypeArgs(),
+                body = body
+                ))
+
+        self.output.out (template_close_namespace.format (namespace="doxygen"))
+        self.output.close ()
 
     def registerReference (self, obj, overwrite=True):
         if obj.id in self.references:
@@ -438,17 +533,63 @@ class Index:
         return self.references[id]
 
 class OutputStreams(object):
-    def __init__ (self, output, error, errorPrefix = ""):
-        self._out = output
+    def __init__ (self, output_dir, error, errorPrefix = ""):
+        self.output_dir = output_dir
+        self._out = None
         self._err = error
         self.errorPrefix = errorPrefix
+
+        self._created_files = dict()
+
+    def open (self, name):
+        assert self._out == None, "You did not close the previous file"
+        import os
+        fullname = os.path.join(self.output_dir, name)
+        dirname = os.path.dirname(fullname)
+        if not os.path.isdir (dirname): os.makedirs (dirname)
+
+        if name in self._created_files:
+            self._out = self._created_files[name]
+        else:
+            self._out = open(fullname, mode='w')
+            self._created_files[name] = self._out
+
+            # Header
+            self.out(template_file_header.format (
+                path = os.path.dirname(os.path.abspath(__file__)),
+                header_guard = makeHeaderGuard (name),
+                ))
+
+    def close (self):
+        self._out = None
+
+    def writeFooterAndCloseFiles (self):
+        for n, f in self._created_files.items():
+            # Footer
+            self._out = f
+            self.out(template_file_footer.format(
+                header_guard = makeHeaderGuard (n),
+                ))
+            f.close()
+        self._created_files.clear()
+        self._out = None
+
     def out(self, *args):
         print (*args, file=self._out)
     def err(self, *args):
         print (self.errorPrefix, *args, file=self._err)
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Process Doxygen XML documentation and generate C++ code.')
+    parser.add_argument('doxygen_index_xml', type=str, help='the Doxygen XML index.')
+    parser.add_argument('output_directory', type=str, help='the output directory.')
+    args = parser.parse_args()
+
     index = Index (input = sys.argv[1],
-            output = OutputStreams (sys.stdout, sys.stderr))
+            output = OutputStreams (args.output_directory, sys.stderr))
     index.parseCompound()
     index.write()
+    index.output.writeFooterAndCloseFiles()
+    assert index.output._out == None
