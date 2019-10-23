@@ -448,7 +448,7 @@ class Index:
         self.tree = etree.parse (input)
         self.directory = path.dirname (input)
         self.xml_docstring = XmlDocString (self)
-        self.compounds = set()
+        self.compounds = list()
         self.references = dict()
         self.output = output
 
@@ -458,12 +458,18 @@ class Index:
                 obj = ClassCompound (compound, self)
             elif compound.attrib['kind'] == "namespace":
                 obj = NamespaceCompound (compound, self)
-            self.compounds.add (obj.id)
+            if obj.id not in self.compounds:
+                self.compounds.append (obj.id)
             self.registerReference (obj)
 
     def write (self):
         # Header
         from os.path import abspath, dirname
+        from time import asctime
+
+        self.output.open ("doxygen_xml_parser_for_cmake.hh")
+        self.output.out ("// Generated on {}".format (asctime()))
+        self.output.close()
 
         # Implement template specialization for classes and member functions
         for id in self.compounds:
@@ -474,11 +480,14 @@ class Index:
 
         # Implement template specialization for static functions
         static_funcs = dict()
-        includes = set()
+        prototypes = list()
+        includes = list()
         for id in self.compounds:
             compound = self.references[id]
             for m in compound.static_funcs:
-                includes.add (m.include())
+                include = m.include()
+                if include not in includes:
+                    includes.append (include)
                 docstring = m.s_docstring()
                 if len(docstring) == 0: continue
                 prototype = m.prototypekey()
@@ -486,6 +495,7 @@ class Index:
                     static_funcs[prototype].append ( (m, docstring) )
                 else:
                     static_funcs[prototype] = [ (m, docstring) , ]
+                    prototypes.append (prototype)
 
         self.output.out (
                 "".join([ template_include_intern.format (filename=filename)
@@ -493,7 +503,8 @@ class Index:
 
         self.output.out (template_open_namespace.format (namespace="doxygen"))
 
-        for prototype, member_and_docstring_s in static_funcs.items():
+        for prototype in prototypes:
+            member_and_docstring_s = static_funcs[prototype]
             body = "".join([
                 template_static_func_doc_body.format (
                     namespace = member.parent.innerNamespace(),
