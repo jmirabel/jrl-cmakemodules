@@ -23,10 +23,10 @@ class XmlDocString (object):
     def writeErrors (self, output):
         ret = False
         for t in self.unkwownTags:
-            output.err ("Unknown tag: ", t)
+            output.warn ("Unknown tag: ", t)
             ret = True
         for ref,node in self.unkwownReferences.items():
-            output.err ("Unknown reference: ", ref, node.text)
+            output.warn ("Unknown reference: ", ref, node.text)
             ret = True
         return ret
 

@@ -141,7 +141,7 @@ class Reference(object):
                 elif self.index.hasref(refid):
                     t += " " + self.index.getref(refid).name
                 else:
-                    self.index.output.err ("Unknown reference: ", c.text, refid)
+                    self.index.output.warn ("Unknown reference: ", c.text, refid)
                     t += " " + c.text.strip()
             else:
                 if c.text is not None:
@@ -361,7 +361,7 @@ class ClassCompound (CompoundBase):
     def write (self, output):
         if not self.public: return
         if self.template_specialization:
-            output.err ("Disable class {} because template argument are not resolved for templated class specialization.".format(self.name))
+            output.warn ("Disable class {} because template argument are not resolved for templated class specialization.".format(self.name))
             return
 
         include = self.definition.find('includes')
@@ -531,9 +531,9 @@ class Index:
     def registerReference (self, obj, overwrite=True):
         if obj.id in self.references:
             if obj.name != self.references[obj.id].name:
-                self.output.err ("!!!! Compounds " + obj.id + " already exists.", obj.name, self.references[obj.id].name)
+                self.output.warn ("!!!! Compounds " + obj.id + " already exists.", obj.name, self.references[obj.id].name)
             else:
-                self.output.err ("Reference " + obj.id + " already exists.", obj.name)
+                self.output.warn ("Reference " + obj.id + " already exists.", obj.name)
             if not overwrite: return
         self.references[obj.id] = obj
 
@@ -544,9 +544,10 @@ class Index:
         return self.references[id]
 
 class OutputStreams(object):
-    def __init__ (self, output_dir, error, errorPrefix = ""):
+    def __init__ (self, output_dir, warn, error, errorPrefix = ""):
         self.output_dir = output_dir
         self._out = None
+        self._warn = warn
         self._err = error
         self.errorPrefix = errorPrefix
 
@@ -587,6 +588,8 @@ class OutputStreams(object):
 
     def out(self, *args):
         print (*args, file=self._out)
+    def warn(self, *args):
+        print (self.errorPrefix, *args, file=self._warn)
     def err(self, *args):
         print (self.errorPrefix, *args, file=self._err)
 
@@ -599,7 +602,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     index = Index (input = sys.argv[1],
-            output = OutputStreams (args.output_directory, sys.stderr))
+            output = OutputStreams (args.output_directory, sys.stdout, sys.stderr))
     index.parseCompound()
     index.write()
     index.output.writeFooterAndCloseFiles()
