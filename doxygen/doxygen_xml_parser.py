@@ -288,6 +288,7 @@ class ClassCompound (CompoundBase):
         self.member_funcs = list()
         self.static_funcs = list()
         self.special_funcs = list()
+        self.attributes = list()
 
         self.struct = (self.compound.attrib['kind'] == "struct")
         self.public = (self.definition.attrib['prot'] == "public")
@@ -437,8 +438,7 @@ class ClassCompound (CompoundBase):
         output.close()
 
     def _attribute (self, member):
-        # TODO
-        pass
+        self.attributes.append (member)
 
 class Index:
     """

@@ -80,6 +80,18 @@ inline const char* destructor_doc ()
   return destructor_doc_impl<Class>::run();
 }
 
+/* TODO class attribute can be handled by
+
+template <typename Class, typename AttributeType>
+const char* attribute_doc (AttributeType Class::* ptr)
+{
+  // Body looks like
+  // if (ptr == &Class::attributeName)
+  //   return "attrib documentation";
+  return "undocumented";
 }
+*/
+
+} // namespace doxygen
 
 #endif // DOXYGEN_DOC_HH
